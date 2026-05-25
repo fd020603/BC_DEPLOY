@@ -12,7 +12,12 @@ import {
   SectionIntro,
 } from "./workspace-ui";
 import { formatJson } from "./workspace-runtime";
-import { buildBeginnerGuidance } from "./result-guidance";
+import {
+  buildBeginnerGuidance,
+  buildBeginnerIssueGuides,
+  buildResultSummaryCounts,
+  getDecisionRiskCopy,
+} from "./result-guidance";
 
 const DECISION_ORDER = [
   "deny",
@@ -135,41 +140,79 @@ function KeyReasonList({
 }: {
   evaluationResult: EvaluationResult;
 }) {
-  const keyRules = evaluationResult.triggered_rules.slice(0, 4);
+  const issueGuides = buildBeginnerIssueGuides(evaluationResult).slice(0, 4);
 
   return (
     <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-strong)] p-4">
       <h3 className="text-sm font-semibold text-[var(--color-ink)]">
-        왜 이런 결과가 나왔나요?
+        항목별 쉬운 설명
       </h3>
-      {keyRules.length > 0 ? (
+      {issueGuides.length > 0 ? (
         <div className="mt-3 space-y-3">
-          {keyRules.map((rule, index) => (
+          {issueGuides.map((guide, index) => (
             <div
-              key={rule.rule_id}
+              key={guide.id}
               className="rounded-lg border border-[var(--color-line)] bg-white p-3"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-[var(--color-surface-muted)] px-2 py-1 text-xs font-semibold text-[var(--color-muted)]">
-                  이유 {index + 1}
+                  항목 {index + 1}
                 </span>
-                <DecisionBadge decision={rule.decision} compact />
+                <span className="rounded-md border border-[var(--color-line)] px-2 py-1 text-xs font-semibold text-[var(--color-muted)]">
+                  {guide.priorityTag}
+                </span>
+                {guide.quickFixTag ? (
+                  <span className="rounded-md border border-[var(--color-success)] bg-[var(--color-success-soft)] px-2 py-1 text-xs font-semibold text-[var(--color-success)]">
+                    {guide.quickFixTag}
+                  </span>
+                ) : null}
               </div>
               <p className="mt-2 text-sm font-semibold leading-6 text-[var(--color-ink)]">
-                {rule.message}
+                {guide.title}
               </p>
-              {rule.rationale !== rule.message ? (
-                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                  {rule.rationale}
-                </p>
-              ) : null}
-              {rule.required_actions[0] ? (
-                <p className="mt-2 text-xs font-semibold leading-6 text-[var(--color-muted)]">
-                  필요 조치: {rule.required_actions[0]}
-                </p>
-              ) : null}
+              <p className="mt-2 text-xs font-semibold leading-6 text-[var(--color-muted)]">
+                {guide.riskLabel}
+              </p>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    현재 상태
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.currentStatus}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    왜 위험한가요?
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.whyRisky}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    쉬운 설명
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.easyExplanation}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    지금 해야 할 일
+                  </p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.actions.slice(0, 4).map((action) => (
+                      <li key={`${guide.id}-${action}`} className="pl-1">
+                        {action}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
               <p className="mt-2 text-xs leading-6 text-[var(--color-muted)]">
-                관련 근거: {rule.article}
+                관련 근거: {guide.article}
               </p>
             </div>
           ))}
@@ -292,6 +335,13 @@ export function ResultPanel({
     : null;
   const primaryRule = evaluationResult?.triggered_rules[0];
   const primaryIssue = primaryRule?.message ?? evaluationResult?.summary;
+  const summaryCounts = evaluationResult
+    ? buildResultSummaryCounts(evaluationResult)
+    : null;
+  const firstAction =
+    evaluationResult?.required_actions[0] ??
+    beginnerGuidance?.firstAction ??
+    "입력값이나 실제 설정이 바뀌면 다시 평가해 주세요.";
 
   return (
     <section className="glass-panel rounded-lg border border-[var(--color-line)] p-5 sm:p-6">
@@ -307,9 +357,14 @@ export function ResultPanel({
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <DecisionBadge decision={activeDecision} />
-              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
-                {evaluationResult.pack_info.pack_name} v{evaluationResult.pack_info.version}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-md border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-semibold text-[var(--color-muted)]">
+                  {getDecisionRiskCopy(activeDecision)}
+                </span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+                  {evaluationResult.pack_info.pack_name} v{evaluationResult.pack_info.version}
+                </span>
+              </div>
             </div>
             <h3
               className={`mt-4 text-3xl font-semibold tracking-tight ${DECISION_TEXT_CLASSES[activeDecision]}`}
@@ -343,22 +398,36 @@ export function ResultPanel({
             ) : null}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <SummaryMetric
-              label="발동 규칙"
-              value={evaluationResult.triggered_rules.length}
-              helper="결과에 영향을 준 규칙"
-            />
-            <SummaryMetric
-              label="필수 조치"
-              value={evaluationResult.required_actions.length}
-              helper="운영 전 처리할 항목"
-            />
-            <SummaryMetric
-              label="증빙 공백"
-              value={evaluationResult.qualitative_review_hints.evidence_gaps.length}
-              helper="추가 확인이 필요한 정보"
-            />
+          <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-ink)]">
+              한눈에 보는 요약
+            </p>
+            <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+              현재 {summaryCounts?.dangerous ?? 0}개의 항목은 바로 확인이 필요합니다.
+              {(summaryCounts?.dangerous ?? 0) > 0
+                ? " 먼저 위험도가 높은 항목부터 수정하는 것을 권장합니다."
+                : " 바로 막히는 항목은 없지만, 권장 항목은 차례대로 확인해 주세요."}
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[var(--color-ink)]">
+              먼저 할 일: {firstAction}
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <SummaryMetric
+                label="바로 확인 필요"
+                value={summaryCounts?.dangerous ?? 0}
+                helper="지금 먼저 봐야 할 위험"
+              />
+              <SummaryMetric
+                label="수정 권장"
+                value={summaryCounts?.recommended ?? 0}
+                helper="빠른 시일 내 보완할 항목"
+              />
+              <SummaryMetric
+                label="안전 또는 미해당"
+                value={summaryCounts?.safe ?? 0}
+                helper="이번 입력에서 문제로 잡히지 않은 규칙"
+              />
+            </div>
           </div>
 
           {beginnerGuidance ? (

@@ -156,8 +156,248 @@ type BeginnerGuidance = {
 
 type TriggeredRule = EvaluationResult["triggered_rules"][number];
 
+export type RiskLevel = "high" | "medium" | "low";
+
+export type ResultSummaryCounts = {
+  dangerous: number;
+  recommended: number;
+  safe: number;
+};
+
+export type BeginnerIssueGuide = {
+  id: string;
+  title: string;
+  article: string;
+  riskLevel: RiskLevel;
+  riskLabel: string;
+  priorityTag: string;
+  easyExplanation: string;
+  currentStatus: string;
+  whyRisky: string;
+  actions: string[];
+  quickFixTag?: string;
+};
+
+const DECISION_RISK_LEVEL: Record<EvaluationResult["final_decision"], RiskLevel> = {
+  deny: "high",
+  manual_review: "medium",
+  condition_allow: "medium",
+  allow: "low",
+};
+
+const RISK_COPY: Record<RiskLevel, string> = {
+  high: "높음: 지금 바로 확인이 필요한 위험",
+  medium: "보통: 빠른 시일 내에 수정하면 좋은 항목",
+  low: "낮음: 보안 수준을 더 높이기 위한 권장 항목",
+};
+
 function dedupe(values: string[]) {
   return values.filter((value, index) => value && values.indexOf(value) === index);
+}
+
+export function getDecisionRiskLevel(
+  decision: EvaluationResult["final_decision"],
+) {
+  return DECISION_RISK_LEVEL[decision];
+}
+
+export function getDecisionRiskCopy(
+  decision: EvaluationResult["final_decision"],
+) {
+  return RISK_COPY[getDecisionRiskLevel(decision)];
+}
+
+export function buildResultSummaryCounts(
+  evaluationResult: EvaluationResult,
+): ResultSummaryCounts {
+  const dangerous = evaluationResult.triggered_rules.filter(
+    (rule) => rule.decision === "deny",
+  ).length;
+  const recommended = evaluationResult.triggered_rules.filter(
+    (rule) =>
+      rule.decision === "manual_review" || rule.decision === "condition_allow",
+  ).length;
+  const evaluatedCount = evaluationResult.evaluation_trace.evaluated_rule_count;
+  const matchedCount = evaluationResult.evaluation_trace.matched_rule_count;
+  const safe = Math.max(0, evaluatedCount - matchedCount);
+
+  return { dangerous, recommended, safe };
+}
+
+function firstNonEmpty(values: Array<string | undefined>) {
+  return values.find((value) => value && value.trim().length > 0) ?? "";
+}
+
+function stripTrailingPeriod(value: string) {
+  return value.replace(/[.。]$/u, "");
+}
+
+function buildEasyExplanation(rule: TriggeredRule) {
+  const categoryHint =
+    CATEGORY_EXPLAINERS[rule.category] ?? "개인정보 보호에 필요한 확인 항목";
+
+  if (rule.category === "security_controls") {
+    return "파일을 잠그고, 볼 수 있는 사람을 제한하고, 사고가 났을 때 바로 대응할 준비가 되어 있는지 보는 항목입니다.";
+  }
+
+  if (
+    rule.category === "cross_border_transfer" ||
+    rule.category === "transfer_mechanism"
+  ) {
+    return "데이터를 다른 나라로 보내도 되는 근거와 보호장치가 있는지 보는 항목입니다.";
+  }
+
+  if (rule.category === "lawfulness") {
+    return "고객 정보를 왜 모으고 쓸 수 있는지, 법적으로 설명할 수 있는 근거를 확인하는 항목입니다.";
+  }
+
+  if (
+    rule.category === "sensitive_data" ||
+    rule.category === "special_category_data"
+  ) {
+    return "건강, 생체, 상담 내용처럼 더 조심해서 다뤄야 하는 정보가 있는지 보는 항목입니다.";
+  }
+
+  if (rule.category === "processor_management") {
+    return "외부 업체에 맡길 때 계약서와 관리 책임이 준비되어 있는지 보는 항목입니다.";
+  }
+
+  return `${categoryHint}을 쉬운 말로 확인하는 항목입니다.`;
+}
+
+function buildCurrentStatus(rule: TriggeredRule) {
+  const message = firstNonEmpty([rule.message, rule.rationale, rule.title]);
+  if (rule.decision === "deny") {
+    return `${stripTrailingPeriod(message)}. 지금 상태에서는 그대로 진행하기 어렵습니다.`;
+  }
+  if (rule.decision === "manual_review") {
+    return `${stripTrailingPeriod(message)}. 자동 판단만으로는 충분하지 않아 사람이 확인해야 합니다.`;
+  }
+  if (rule.decision === "condition_allow") {
+    return `${stripTrailingPeriod(message)}. 보완 조치가 끝나면 진행 가능성이 있습니다.`;
+  }
+  return `${stripTrailingPeriod(message)}. 현재 입력 기준으로는 큰 차단 사유가 확인되지 않았습니다.`;
+}
+
+function buildWhyRisky(rule: TriggeredRule) {
+  if (rule.category === "security_controls") {
+    return "그대로 두면 외부 접근, 유출, 사고 대응 지연으로 이어질 수 있고, 사고 뒤에 어떤 보호조치를 했는지 설명하기 어렵습니다.";
+  }
+
+  if (
+    rule.category === "cross_border_transfer" ||
+    rule.category === "transfer_mechanism"
+  ) {
+    return "데이터가 해외로 나간 뒤 문제가 생기면 회수나 통제가 어렵고, 고객 안내나 계약 근거가 부족했다는 지적을 받을 수 있습니다.";
+  }
+
+  if (rule.category === "lawfulness") {
+    return "근거가 불명확하면 고객 정보를 모으거나 보내는 일 자체가 문제가 될 수 있고, 삭제 요청이나 감독기관 문의에 대응하기 어렵습니다.";
+  }
+
+  if (
+    rule.category === "sensitive_data" ||
+    rule.category === "special_category_data"
+  ) {
+    return "민감한 정보는 유출되었을 때 고객 피해가 크고, 일반 정보보다 더 강한 동의나 보호조치를 요구받을 수 있습니다.";
+  }
+
+  if (rule.category === "processor_management") {
+    return "외부 업체가 데이터를 잘못 다루어도 책임 소재와 재발 방지 방법을 설명하기 어려울 수 있습니다.";
+  }
+
+  return "방치하면 고객 문의, 내부 승인, 감독기관 점검 때 왜 안전하다고 판단했는지 설명하기 어려워질 수 있습니다.";
+}
+
+function buildActionFallback(rule: TriggeredRule) {
+  if (rule.category === "security_controls") {
+    return [
+      "관리자 페이지에 접속합니다.",
+      "스토리지, 데이터베이스 또는 보안 설정 메뉴로 이동합니다.",
+      "암호화, 접근 권한, 사고 대응 절차가 켜져 있는지 확인합니다.",
+      "변경 후 다시 점검 버튼을 눌러 결과가 바뀌었는지 확인합니다.",
+    ];
+  }
+
+  if (
+    rule.category === "cross_border_transfer" ||
+    rule.category === "transfer_mechanism"
+  ) {
+    return [
+      "데이터가 어느 나라로 이동하는지 다시 확인합니다.",
+      "이전 근거가 적정성, 표준계약, 명시적 동의, 예외 사유 중 어디에 해당하는지 정합니다.",
+      "계약서, 고지문, 동의 화면 등 근거 문서를 준비합니다.",
+      "준비한 내용을 입력값에 반영한 뒤 다시 평가합니다.",
+    ];
+  }
+
+  if (rule.category === "processor_management") {
+    return [
+      "외부 업체와 맺은 계약서 또는 이용약관을 엽니다.",
+      "처리 목적, 보안조치, 재위탁 제한, 사고 통지 조항이 있는지 확인합니다.",
+      "빠진 조항은 업체 담당자에게 수정 또는 보완 문서를 요청합니다.",
+      "보완한 계약 내용을 저장하고 다시 평가합니다.",
+    ];
+  }
+
+  if (
+    rule.category === "lawfulness" ||
+    rule.category === "sensitive_data" ||
+    rule.category === "special_category_data"
+  ) {
+    return [
+      "이 데이터를 왜 필요한지 한 문장으로 정리합니다.",
+      "동의, 계약 이행, 법적 의무 등 어떤 근거로 처리하는지 선택합니다.",
+      "민감정보라면 별도 동의나 법령상 근거가 있는지 확인합니다.",
+      "고지문 또는 동의 화면을 업데이트한 뒤 다시 평가합니다.",
+    ];
+  }
+
+  return [
+    "결과 카드의 현재 상태를 확인합니다.",
+    "필요한 문서나 설정 화면을 찾아 부족한 항목을 채웁니다.",
+    "변경 내용을 저장합니다.",
+    "다시 점검 버튼을 눌러 같은 항목이 사라졌는지 확인합니다.",
+  ];
+}
+
+function buildBeginnerActions(rule: TriggeredRule) {
+  const directActions = rule.required_actions
+    .filter(Boolean)
+    .map((action) => stripTrailingPeriod(action));
+  const fallback = buildActionFallback(rule);
+  return dedupe([...directActions, ...fallback]).slice(0, 5);
+}
+
+export function buildBeginnerIssueGuides(
+  evaluationResult: EvaluationResult,
+): BeginnerIssueGuide[] {
+  return evaluationResult.triggered_rules.slice(0, 6).map((rule, index) => {
+    const riskLevel = DECISION_RISK_LEVEL[rule.decision];
+    const isFirstHighRisk = index === 0 && riskLevel === "high";
+    const priorityTag = isFirstHighRisk
+      ? "먼저 해결하세요"
+      : riskLevel === "medium"
+        ? "빠르게 확인하세요"
+        : "유지하면 좋습니다";
+
+    return {
+      id: rule.rule_id,
+      title: rule.title || rule.message || `점검 항목 ${index + 1}`,
+      article: rule.article,
+      riskLevel,
+      riskLabel: RISK_COPY[riskLevel],
+      priorityTag,
+      quickFixTag:
+        rule.category === "security_controls" || rule.required_actions.length <= 1
+          ? "빠르게 수정 가능"
+          : undefined,
+      easyExplanation: buildEasyExplanation(rule),
+      currentStatus: buildCurrentStatus(rule),
+      whyRisky: buildWhyRisky(rule),
+      actions: buildBeginnerActions(rule),
+    };
+  });
 }
 
 function explainArticles(articles: string[]) {

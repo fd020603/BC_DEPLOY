@@ -40,7 +40,7 @@ const fieldLabels: Record<string, string> = {
   current_region: "현재 리전",
   encryption_at_rest: "저장 시 암호화",
   encryption_in_transit: "전송 시 암호화",
-  access_control_in_place: "Public Access Block",
+  access_control_in_place: "외부 공개 접근 차단",
   data_type: "데이터 유형",
   contains_sensitive_data: "민감정보 포함 여부",
   uses_processor: "외부 처리자 사용 여부",
@@ -50,6 +50,19 @@ const fieldLabels: Record<string, string> = {
   transfer_exception: "이전 예외",
   risk_assessment: "위험평가",
   dpo_review: "DPO/개인정보 담당자 검토",
+};
+
+type TechnicalSettingGuide = {
+  field: (typeof technicalFields)[number];
+  title: string;
+  value: unknown;
+  statusLabel: string;
+  toneClass: string;
+  currentStatus: string;
+  whyRisky: string;
+  easyExplanation: string;
+  actions: string[];
+  priorityTag: string;
 };
 
 function valueLabel(value: unknown) {
@@ -67,6 +80,105 @@ function valueLabel(value: unknown) {
 
 function isKnownValue(value: unknown) {
   return value !== null && value !== undefined && value !== "";
+}
+
+function buildTechnicalSettingGuide(
+  field: (typeof technicalFields)[number],
+  value: unknown,
+): TechnicalSettingGuide {
+  const known = isKnownValue(value);
+  const enabled = known && value !== false;
+
+  const base = {
+    field,
+    value,
+    statusLabel: enabled ? "안전" : known ? "확인 필요" : "정보 부족",
+    toneClass: enabled
+      ? "border-[var(--color-success)] bg-[var(--color-success-soft)] text-[var(--color-success)]"
+      : "border-[var(--color-warning)] bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
+    priorityTag: enabled ? "현재 유지" : "먼저 확인",
+  };
+
+  if (field === "access_control_in_place") {
+    return {
+      ...base,
+      title: "외부 사람이 파일을 볼 수 있는 상태",
+      currentStatus: enabled
+        ? "S3 버킷의 공개 접근 차단 설정이 켜져 있습니다."
+        : "공개 접근 차단이 꺼져 있거나 확인되지 않았습니다.",
+      whyRisky:
+        "버킷이나 파일 권한이 잘못 열리면 링크를 아는 외부 사람이 파일을 볼 수 있습니다.",
+      easyExplanation:
+        "Public Access Block은 외부 공개를 막는 안전 잠금장치입니다.",
+      actions: [
+        "AWS 관리자 페이지에 접속합니다.",
+        "S3 메뉴에서 검사한 버킷을 선택합니다.",
+        "권한 탭으로 이동합니다.",
+        "'모든 공개 접근 차단' 옵션을 켭니다.",
+        "변경 후 다시 검사 버튼을 눌러 확인합니다.",
+      ],
+    };
+  }
+
+  if (field === "encryption_at_rest") {
+    return {
+      ...base,
+      title: "저장된 파일이 암호화되지 않은 상태",
+      currentStatus: enabled
+        ? "S3 버킷의 기본 저장 암호화가 켜져 있습니다."
+        : "저장된 파일을 자동으로 암호화하는 설정이 꺼져 있거나 확인되지 않았습니다.",
+      whyRisky:
+        "파일이 유출되거나 권한이 잘못 열렸을 때 내용이 그대로 노출될 가능성이 커집니다.",
+      easyExplanation:
+        "저장 시 암호화는 파일을 보관할 때 잠금 처리해 두는 설정입니다.",
+      actions: [
+        "AWS 관리자 페이지에 접속합니다.",
+        "S3 메뉴에서 검사한 버킷을 선택합니다.",
+        "속성 탭의 기본 암호화 메뉴로 이동합니다.",
+        "서버 측 암호화를 켭니다.",
+        "변경 후 다시 검사 버튼을 눌러 확인합니다.",
+      ],
+    };
+  }
+
+  if (field === "encryption_in_transit") {
+    return {
+      ...base,
+      title: "파일 전송 중 암호화가 강제되지 않은 상태",
+      currentStatus: enabled
+        ? "HTTPS 같은 안전한 전송만 허용하는 정책이 확인되었습니다."
+        : "안전하지 않은 전송을 막는 정책이 없거나 확인되지 않았습니다.",
+      whyRisky:
+        "파일이 이동하는 중간에 내용이 노출되거나 변조될 위험을 줄이기 어렵습니다.",
+      easyExplanation:
+        "전송 시 암호화는 파일을 주고받는 길도 잠가 두는 설정입니다.",
+      actions: [
+        "AWS 관리자 페이지에 접속합니다.",
+        "S3 메뉴에서 검사한 버킷을 선택합니다.",
+        "권한 탭의 버킷 정책 메뉴로 이동합니다.",
+        "HTTPS가 아닌 요청을 거부하는 정책을 추가합니다.",
+        "변경 후 다시 검사 버튼을 눌러 확인합니다.",
+      ],
+    };
+  }
+
+  return {
+    ...base,
+    title: "데이터가 저장된 위치 확인",
+    currentStatus: known
+      ? `현재 리전은 ${valueLabel(value)}로 확인되었습니다.`
+      : "데이터가 어느 리전에 저장되어 있는지 자동 확인하지 못했습니다.",
+    whyRisky:
+      "저장 위치를 모르면 어떤 나라의 개인정보 규칙을 확인해야 하는지 판단하기 어렵습니다.",
+    easyExplanation:
+      "리전은 파일이 실제로 놓여 있는 데이터센터 위치입니다.",
+    actions: [
+      "AWS 관리자 페이지에 접속합니다.",
+      "S3 메뉴에서 검사한 버킷을 선택합니다.",
+      "버킷의 리전 정보를 확인합니다.",
+      "서비스에서 같은 리전을 선택한 뒤 다시 평가합니다.",
+    ],
+  };
 }
 
 function formatCheckedAt(value: string | null) {
@@ -91,6 +203,21 @@ function ResultCards({ result }: { result: AwsS3CheckResponse }) {
   const businessMissing = businessTagFields.filter(
     (field) => !isKnownValue(normalized[field]),
   );
+  const technicalGuides = technicalFields.map((field) =>
+    buildTechnicalSettingGuide(field, normalized[field]),
+  );
+  const dangerousCount = technicalGuides.filter(
+    (guide) => isKnownValue(guide.value) && guide.value === false,
+  ).length;
+  const recommendedCount =
+    technicalGuides.filter((guide) => !isKnownValue(guide.value)).length +
+    businessMissing.length;
+  const safeCount = technicalGuides.filter(
+    (guide) => isKnownValue(guide.value) && guide.value !== false,
+  ).length;
+  const firstRiskyGuide = technicalGuides.find(
+    (guide) => isKnownValue(guide.value) && guide.value === false,
+  );
 
   return (
     <div className="mt-5 grid gap-4 lg:grid-cols-2">
@@ -106,42 +233,113 @@ function ResultCards({ result }: { result: AwsS3CheckResponse }) {
         </p>
       </div>
 
-      <div className="rounded-lg border border-[var(--color-line)] bg-white p-4">
+      <div className="rounded-lg border border-[var(--color-line)] bg-white p-4 lg:col-span-2">
+        <p className="text-sm font-semibold text-[var(--color-ink)]">
+          한눈에 보는 S3 설정 요약
+        </p>
+        <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+          현재 {dangerousCount}개의 항목은 바로 확인이 필요합니다.
+          {firstRiskyGuide
+            ? ` 먼저 '${firstRiskyGuide.title}' 항목부터 수정하는 것을 권장합니다.`
+            : " 공개 접근과 암호화 항목은 계속 유지해 주세요."}
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-[var(--color-danger)] bg-[var(--color-danger-soft)] p-3">
+            <p className="text-xs font-semibold text-[var(--color-danger)]">
+              바로 확인 필요
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-[var(--color-danger)]">
+              {dangerousCount}개
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-soft)] p-3">
+            <p className="text-xs font-semibold text-[var(--color-warning)]">
+              수정 권장
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-[var(--color-warning)]">
+              {recommendedCount}개
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-success)] bg-[var(--color-success-soft)] p-3">
+            <p className="text-xs font-semibold text-[var(--color-success)]">
+              안전한 항목
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-[var(--color-success)]">
+              {safeCount}개
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-[var(--color-line)] bg-white p-4 lg:col-span-2">
         <p className="text-sm font-semibold text-[var(--color-ink)]">
           AWS에서 자동 확인된 기술 설정
         </p>
-        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--color-muted)]">
-          {technicalFields.map((field) => {
-            const value = normalized[field];
-            const known = isKnownValue(value);
-            return (
-              <li key={field} className="flex items-start gap-2">
-                <span
-                  className={
-                    known && value !== false
-                      ? "font-semibold text-[var(--color-success)]"
-                      : "font-semibold text-[var(--color-warning)]"
-                  }
-                >
-                  {known && value !== false ? "확인됨" : "확인 필요"}
-                </span>
-                <span>
-                  <span className="font-semibold text-[var(--color-ink)]">
-                    {fieldLabels[field]}
+        <div className="mt-3 grid gap-3">
+          {technicalGuides.map((guide) => (
+            <div
+              key={guide.field}
+              className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-strong)] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+                    {fieldLabels[guide.field]} · {valueLabel(guide.value)}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold leading-6 text-[var(--color-ink)]">
+                    {guide.title}
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${guide.toneClass}`}>
+                    {guide.statusLabel}
                   </span>
-                  : {valueLabel(value)}
-                  <span className="mt-1 block text-xs leading-5 text-[var(--color-muted)]">
-                    {known
-                      ? value === false
-                        ? "AWS API에서 확인됨 · 권장 기준 보완 필요"
-                        : "AWS API에서 확인됨"
-                      : "AWS에서 자동 확인 불가"}
+                  <span className="rounded-md border border-[var(--color-line)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-muted)]">
+                    {guide.priorityTag}
                   </span>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    현재 상태
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.currentStatus}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    왜 위험한가요?
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.whyRisky}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    쉬운 설명
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.easyExplanation}
+                  </p>
+                </div>
+                <div className="rounded-md bg-[var(--color-surface-muted)] p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    지금 해야 할 일
+                  </p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.actions.map((action) => (
+                      <li key={`${guide.field}-${action}`} className="pl-1">
+                        {action}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-lg border border-[var(--color-line)] bg-white p-4">

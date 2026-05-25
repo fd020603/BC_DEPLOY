@@ -22,6 +22,22 @@ export function buildErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "요청 처리 중 오류가 발생했습니다.";
 }
 
+function isNetworkFetchError(error: unknown) {
+  return (
+    error instanceof TypeError &&
+    /failed to fetch|fetch failed|networkerror/i.test(error.message)
+  );
+}
+
+function buildNetworkFetchErrorMessage(path: string) {
+  return [
+    "백엔드 서버에 연결하지 못했습니다.",
+    `요청 주소: ${API_BASE_URL}${path}`,
+    "로컬에서 실행 중이라면 backend 폴더에서 `python -m uvicorn app.main:app --host 127.0.0.1 --port 9001`을 먼저 실행한 뒤 다시 평가해 주세요.",
+    "배포 환경이라면 NEXT_PUBLIC_API_BASE_URL이 실제 백엔드 주소로 설정되어 있는지 확인해 주세요.",
+  ].join(" ");
+}
+
 export function getOptionLabel(
   options: FieldOption[],
   value: string,
@@ -173,14 +189,23 @@ export function buildPayload(formState: FormState) {
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (isNetworkFetchError(error)) {
+      throw new Error(buildNetworkFetchErrorMessage(path));
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     let detail = "요청에 실패했습니다.";

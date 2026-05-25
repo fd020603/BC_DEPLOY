@@ -41,6 +41,11 @@ import {
   SummaryRow,
   TextList,
 } from "./workspace-ui";
+import {
+  buildBeginnerIssueGuides,
+  buildResultSummaryCounts,
+  getDecisionRiskCopy,
+} from "./result-guidance";
 
 type PackId = keyof typeof PACK_UI_DEFINITIONS & string;
 type ScreenMode = "intro" | "step" | "review" | "result";
@@ -145,13 +150,6 @@ const regionToCountry: Record<string, string> = {
 };
 
 const euEeaCountries = new Set(["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IS", "IE", "IT", "LV", "LI", "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE"]);
-
-const decisionRiskLabel: Record<DecisionGrade, string> = {
-  deny: "High",
-  manual_review: "Medium",
-  condition_allow: "Medium",
-  allow: "Low",
-};
 
 const decisionReasonTitle: Record<DecisionGrade, string> = {
   deny: "왜 진행하면 안 되나요?",
@@ -834,8 +832,11 @@ function ScenarioSetup({
 }
 
 function ReadableExplanation({ result }: { result: EvaluationResult }) {
-  const rules = result.triggered_rules.slice(0, 6);
-  const extraRuleCount = Math.max(0, result.triggered_rules.length - rules.length);
+  const issueGuides = buildBeginnerIssueGuides(result);
+  const extraRuleCount = Math.max(
+    0,
+    result.triggered_rules.length - issueGuides.length,
+  );
   const rawExplanation = result.explanation || result.summary;
 
   return (
@@ -843,85 +844,99 @@ function ReadableExplanation({ result }: { result: EvaluationResult }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-[var(--color-ink)]">
-            평가 설명
+            항목별 쉬운 설명
           </p>
           <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
-            긴 원문 설명을 규칙별 사유와 조치로 나눠 정리했습니다.
+            무엇이 문제인지, 왜 위험한지, 지금 어떤 순서로 고치면 되는지 나눠 정리했습니다.
           </p>
         </div>
         <span className="rounded-md border border-[var(--color-line)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-muted)]">
-          {rules.length}개 사유
+          {issueGuides.length}개 항목
         </span>
       </div>
 
       <div className="mt-4 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-muted)] p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
-          Summary
+          전체 요약
         </p>
         <p className="mt-2 text-sm leading-7 text-[var(--color-ink)]">
           {result.summary || decisionReasonLead[result.final_decision]}
         </p>
       </div>
 
-      {rules.length > 0 ? (
+      {issueGuides.length > 0 ? (
         <div className="mt-4 grid gap-3">
-          {rules.map((rule, index) => (
+          {issueGuides.map((guide, index) => (
             <div
-              key={`readable-${rule.rule_id}`}
+              key={`readable-${guide.id}`}
               className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-strong)] p-4"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
-                    Reason {index + 1}
-                    {rule.article ? ` · ${rule.article}` : ""}
+                    점검 항목 {index + 1}
+                    {guide.article ? ` · ${guide.article}` : ""}
                   </p>
                   <p className="mt-1 text-sm font-semibold leading-6 text-[var(--color-ink)]">
-                    {rule.message || rule.title}
+                    {guide.title}
                   </p>
                 </div>
-                <DecisionBadge decision={rule.decision} compact />
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className="rounded-md border border-[var(--color-line)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-muted)]">
+                    {guide.priorityTag}
+                  </span>
+                  {guide.quickFixTag ? (
+                    <span className="rounded-md border border-[var(--color-success)] bg-[var(--color-success-soft)] px-2 py-1 text-xs font-semibold text-[var(--color-success)]">
+                      {guide.quickFixTag}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
-              {rule.rationale && rule.rationale !== rule.message ? (
-                <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  {rule.rationale}
-                </p>
-              ) : null}
+              <p className="mt-3 rounded-md bg-[var(--color-surface-muted)] px-3 py-2 text-sm font-semibold leading-6 text-[var(--color-ink)]">
+                {guide.riskLabel}
+              </p>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 <div className="rounded-md bg-white p-3">
                   <p className="text-xs font-semibold text-[var(--color-ink)]">
-                    확인 사실
+                    현재 상태
                   </p>
-                  {rule.matched_facts.length > 0 ? (
-                    <ul className="mt-2 space-y-1 text-sm leading-6 text-[var(--color-muted)]">
-                      {rule.matched_facts.slice(0, 3).map((fact) => (
-                        <li key={`${rule.rule_id}-${fact}`}>- {fact}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-[var(--color-muted)]">
-                      확인 사실이 없습니다.
-                    </p>
-                  )}
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.currentStatus}
+                  </p>
                 </div>
 
                 <div className="rounded-md bg-white p-3">
                   <p className="text-xs font-semibold text-[var(--color-ink)]">
-                    필요 조치
+                    왜 위험한가요?
                   </p>
-                  {rule.required_actions.length > 0 ? (
-                    <ul className="mt-2 space-y-1 text-sm leading-6 text-[var(--color-muted)]">
-                      {rule.required_actions.slice(0, 3).map((action) => (
-                        <li key={`${rule.rule_id}-${action}`}>- {action}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-[var(--color-muted)]">
-                      별도 조치가 반환되지 않았습니다.
-                    </p>
-                  )}
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.whyRisky}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[0.8fr_1.2fr]">
+                <div className="rounded-md bg-white p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    쉬운 설명
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.easyExplanation}
+                  </p>
+                </div>
+                <div className="rounded-md bg-white p-3">
+                  <p className="text-xs font-semibold text-[var(--color-ink)]">
+                    지금 해야 할 일
+                  </p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-[var(--color-muted)]">
+                    {guide.actions.map((action) => (
+                      <li key={`${guide.id}-${action}`} className="pl-1">
+                        {action}
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               </div>
             </div>
@@ -935,7 +950,7 @@ function ReadableExplanation({ result }: { result: EvaluationResult }) {
 
       {extraRuleCount > 0 ? (
         <p className="mt-3 text-xs font-semibold text-[var(--color-muted)]">
-          나머지 {extraRuleCount}개 규칙은 위 triggered_rules 목록에서 확인할 수 있습니다.
+          나머지 {extraRuleCount}개 규칙은 상세 규칙 목록에서 확인할 수 있습니다.
         </p>
       ) : null}
 
@@ -1009,6 +1024,10 @@ function PackResultCard({
     result.qualitative_review_hints.evidence_gaps.length > 0
       ? result.qualitative_review_hints.evidence_gaps
       : mainReasons.flatMap((rule) => rule.required_evidence).filter(Boolean);
+  const summaryCounts = buildResultSummaryCounts(result);
+  const firstAction =
+    requiredActions[0] ??
+    "입력값과 실제 설정이 바뀌면 다시 평가를 실행해 현재 상태를 확인하세요.";
 
   return (
     <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-strong)] p-5">
@@ -1024,14 +1043,43 @@ function PackResultCard({
         <div className="flex flex-wrap items-center gap-2">
           <DecisionBadge decision={result.final_decision} />
           <span className="rounded-md border border-[var(--color-line)] bg-white px-3 py-1 text-sm font-semibold text-[var(--color-muted)]">
-            Risk: {decisionRiskLabel[result.final_decision]}
+            {getDecisionRiskCopy(result.final_decision)}
           </span>
         </div>
       </div>
 
+      <div className="mt-5 rounded-lg border border-[var(--color-line)] bg-white p-4">
+        <p className="text-sm font-semibold text-[var(--color-ink)]">
+          한눈에 보는 요약
+        </p>
+        <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+          현재 {summaryCounts.dangerous}개의 항목은 바로 확인이 필요합니다.
+          {summaryCounts.dangerous > 0
+            ? " 먼저 위험도가 높은 항목부터 수정하는 것을 권장합니다."
+            : " 바로 막히는 항목은 없지만, 권장 항목은 차례대로 확인해 주세요."}
+        </p>
+        <p className="mt-2 text-sm font-semibold leading-6 text-[var(--color-ink)]">
+          먼저 할 일: {firstAction}
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <MetricCard
+            label="바로 확인 필요"
+            value={`${summaryCounts.dangerous}개`}
+          />
+          <MetricCard
+            label="수정 권장"
+            value={`${summaryCounts.recommended}개`}
+          />
+          <MetricCard
+            label="안전 또는 미해당"
+            value={`${summaryCounts.safe}개`}
+          />
+        </div>
+      </div>
+
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <SummaryRow label="final_decision" value={result.final_decision} />
-          <SummaryRow label="risk_level" value={decisionRiskLabel[result.final_decision]} />
+          <SummaryRow label="최종 판단" value={result.final_decision} />
+          <SummaryRow label="위험도" value={getDecisionRiskCopy(result.final_decision)} />
         {packResult.evaluationRole ? (
           <SummaryRow label="평가 역할" value={packResult.evaluationRole} />
         ) : null}
@@ -1048,7 +1096,7 @@ function PackResultCard({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
-              Decision Reason
+              판단 이유
             </p>
             <h3 className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
               {decisionReasonTitle[result.final_decision]}
@@ -1132,15 +1180,15 @@ function PackResultCard({
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <TextList
-          title="triggered_rules"
+          title="점검된 주요 규칙"
           items={result.triggered_rules.map((rule) => `${rule.rule_id}: ${rule.title}`)}
-          emptyCopy="No rules were triggered."
+          emptyCopy="발동된 규칙이 없습니다."
           compact
         />
         <TextList
-          title="required_actions"
+          title="전체 조치 목록"
           items={result.required_actions}
-          emptyCopy="No required actions returned."
+          emptyCopy="추가 조치가 반환되지 않았습니다."
           compact
         />
       </div>
